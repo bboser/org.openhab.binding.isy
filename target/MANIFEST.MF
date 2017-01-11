@@ -16,7 +16,7 @@ Service-Component: OSGI-INF/binding.xml, OSGI-INF/genericbindingprovid
  er.xml
 Export-Package: org.openhab.binding.isy
 Bundle-Name: openHAB isy Binding
-Bundle-Version: 1.9.0.201611192206
+Bundle-Version: 1.9.0.201611270308
 Bundle-ClassPath: .,lib/isy_inst.jar
 Private-Package: org.openhab.binding.isy.internal
 Ignore-Package: org.openhab.binding.isy.internal

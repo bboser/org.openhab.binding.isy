@@ -64,12 +64,12 @@ public class InsteonClient extends ISYInsteonClient {
         //
         try {
             for (UDControl control : getControls().values()) {
-                logger.debug(String.format(" %s, %s %s", control.name, control.desc,
+                logger.info(String.format(" %s, %s %s", control.name, control.desc,
                         control.isNumeric && control.numericUnit != null ? control.numericUnit : ""));
 
                 if (control.actions != null && !control.actions.isEmpty()) {
                     for (UDAction action : control.actions.values()) {
-                        logger.debug(String.format("    %s %s %s", action.name, action.label,
+                        logger.info(String.format("    %s %s %s", action.name, action.label,
                                 action.desc != null ? action.desc : ""));
                     }
                 }

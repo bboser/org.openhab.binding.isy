@@ -8,9 +8,14 @@
  */
 package org.openhab.binding.isy;
 
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.math.BigDecimal;
+import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
+import java.util.Formatter;
 import java.util.Map;
 
 import org.openhab.binding.isy.internal.ErrorHandler;
@@ -198,6 +203,8 @@ public class ISYActiveBinding extends AbstractActiveBinding<ISYBindingProvider> 
     private static final BigDecimal HUNDRED = new BigDecimal("100.0");
     private static final BigDecimal BYTEMAX = new BigDecimal("255.0");
 
+    Formatter fmtChange = null;
+
     /**
      * Callback from the ISY client when a node changed its state. Find the
      * corresponding openHAB item and send a notification on the event bus.
@@ -219,6 +226,23 @@ public class ISYActiveBinding extends AbstractActiveBinding<ISYBindingProvider> 
             ctrl = ISYControl.valueOf(control.name);
         } catch (IllegalArgumentException ie) {
             ctrl = ISYControl.UNDEFINED;
+        }
+
+        logger.debug("onChange: {} {} ({}<-{}) action={}", ctrl, node.address, node.name, node.parentName, action);
+        if (fmtChange == null) {
+            try {
+                SimpleDateFormat format = new SimpleDateFormat("yyyy-M-dd hh:mm:ss");
+                String date = format.format(new Date());
+                fmtChange = new Formatter(new File("ISY " + date + " onModelChanged.txt"));
+            } catch (FileNotFoundException e) {
+            }
+        }
+        if (fmtChange != null) {
+            SimpleDateFormat format = new SimpleDateFormat("yyyy-M-dd hh:mm:ss");
+            String date = format.format(new Date());
+            fmtChange.format("%s %-8s %-12s %-30s <- %-30s %s\n", date, ctrl, node.address, node.name, node.parentName,
+                    action == null ? "---" : action);
+            fmtChange.flush();
         }
 
         switch (ctrl) {
@@ -266,10 +290,12 @@ public class ISYActiveBinding extends AbstractActiveBinding<ISYBindingProvider> 
                             } else if ("255".equals(action)) {
                                 state = OnOffType.ON;
                             } else {
-                                BigDecimal dim = new BigDecimal((String) action).multiply(HUNDRED).divide(BYTEMAX)
-                                        .setScale(0, BigDecimal.ROUND_HALF_UP);
-
-                                state = new PercentType(dim);
+                            	double d = Double.parseDouble((String)action)*100.0/255;
+                            	int i = (int)d;
+                            	if (i < 0) i = 0;
+                            	if (i > 100) i = 100;
+                            	state = new PercentType(i);
+                            	logger.info("ISY state DIMMER {} -> {} -> {}", action, d, i);
                             }
                             break;
                         case LOCK:
@@ -381,15 +407,27 @@ public class ISYActiveBinding extends AbstractActiveBinding<ISYBindingProvider> 
                 break;
 
             case BATLVL:
+            case USRNUM:
+            case OL:
+            case RR:
+            case TPW:
+            case PPW:
+                // numeric status update
                 for (ISYBindingConfig config : getBindingConfigFromAddress(node.address, control.name)) {
 
-                    state = new DecimalType((String) action);
+                    logger.debug("{} for {} = {}", ctrl, node.name, action);
+                    state = new DecimalType(action == null ? "-1" : (String) action);
                     this.eventPublisher.postUpdate(config.getItemName(), state);
                 }
                 break;
 
+            case ERR:
+            case ALARM:
+                logger.info("{} node={} ({}) action={}", ctrl, node.name, node.address, action);
+                break;
+
             default:
-                this.logger.debug("Unsupported control '{}'", control.name);
+                logger.info("Unsupported control '{}' address = {} action = {}", ctrl, node.address, action);
         }
     }
 
@@ -574,12 +612,12 @@ public class ISYActiveBinding extends AbstractActiveBinding<ISYBindingProvider> 
                         case CLISPH:
                         case CLISPC:
                             DecimalType value = new DecimalType(type.toBigDecimal().multiply(TWO));
-                            this.insteonClient.changeNodeState(config.getControlCommand().name(), value.format("%d"),
+                            insteonClient.changeNodeState(config.getControlCommand().name(), value.format("%d"),
                                     node.address);
                             break;
                         case CLIMD:
                         case CLIFS:
-                            this.insteonClient.changeNodeState(config.getControlCommand().name(), type.format("%s"),
+                            insteonClient.changeNodeState(config.getControlCommand().name(), type.format("%s"),
                                     node.address);
                             break;
                         default:
@@ -592,16 +630,16 @@ public class ISYActiveBinding extends AbstractActiveBinding<ISYBindingProvider> 
                 case DIMMER:
                     switch (config.getControlCommand()) {
                         case ST:
-                            DecimalType dim = new DecimalType(type.toBigDecimal().multiply(HUNDRED).divide(BYTEMAX)
-                                    .setScale(0, BigDecimal.ROUND_HALF_UP));
-
+                        	DecimalType dim = new DecimalType((int)(type.doubleValue()*255.0/100.0));
+                        	logger.info("dim.intValue = {}", dim.intValue());
                             if (dim.intValue() <= 0) {
                                 this.insteonClient.turnDeviceFastOff(node.address);
                             } else if (dim.intValue() >= 255) {
-                                this.insteonClient.turnDeviceFastOn(node.address);
+                                insteonClient.turnDeviceFastOn(node.address);
                             } else {
-                                this.insteonClient.changeNodeState(ISYControl.DON.name(), dim.format("%s"),
+                            	logger.info("changeNodeState({}, {}, {})", ISYControl.DON.name(), dim.format("%s"),
                                         node.address);
+                                insteonClient.changeNodeState(ISYControl.DON.name(), dim.format("%s"),node.address);
                             }
 
                             // TODO: Make it a configuration option to enable immediate
@@ -652,7 +690,7 @@ public class ISYActiveBinding extends AbstractActiveBinding<ISYBindingProvider> 
 
     private void updateStatus(final String itemName, final ISYBindingConfig config) {
 
-        this.logger.debug("updateStatus({},{}) is called!", itemName, config);
+        this.logger.debug("updateStatus({},{})", itemName, config);
 
         if (this.insteonClient != null && this.insteonClient.isISYReady()) {
             try {
